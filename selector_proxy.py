@@ -7,7 +7,7 @@ from itertools import combinations
 import pandas as pd
 
 
-# ----------------------------- Logging -----------------------------
+# ----------------------------- Logging ----------------------------
 
 def setup_logging(verbose: bool):
     level = logging.DEBUG if verbose else logging.INFO
