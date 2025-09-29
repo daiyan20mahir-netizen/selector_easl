@@ -10,7 +10,7 @@ which will switch to using **annotator score variance** instead of model disagre
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/YOURUSERNAME/selector_easl.git
+   git clone https://github.com/daiyan20mahir-netizen/selector_easl.git
    cd selector_easl
    ```
 
