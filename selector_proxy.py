@@ -19,9 +19,11 @@ def setup_logging(verbose: bool):
 def iso_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-def tokenize(text: str):
+_tokenize_pattern = re.compile(r"[a-z0-9]+")
+
+def tokenize(text: str) -> set[str]:
     """Lowercase alphanumeric tokenizer → set of tokens."""
-    return set(re.findall(r"[a-z0-9]+", (text or "").lower()))
+    return set(_tokenize_pattern.findall((text or "").lower()))
 
 # --- NEW: cosine-based uncertainty over TF-IDF embeddings ---
 import numpy as np
