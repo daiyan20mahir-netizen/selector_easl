@@ -43,7 +43,7 @@ selector_easl/
 
 ##  Usage
 
-Prepare your input CSVs (`runs.csv`, `responses.csv`, `prompts.csv`) in a folder, then run:
+Prepare your input CSVs (`runs.csv`, `responses.csv`, `prompts.csv`) in a folder(data), then run:
 
 ```bash
 python selector_proxy.py --base ./data --batch 20
