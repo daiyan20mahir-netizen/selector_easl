@@ -1,0 +1,21 @@
+# Byte-compiled / cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# OS files
+.DS_Store
+
+# Data outputs
+data/
+batches/
+*.csv
+
+# Logs
+*.log
