@@ -106,9 +106,12 @@ def main():
         logger.warning("No new candidates — all responses already selected previously.")
         return
 
-    # ---- Choose scorer (proxy only for Track-A) ----
+    # ---- Scorer (proxy) ----
     scorer: UncertaintyScorer = ProxyTfidfDisagreementScorer()
-    scores = scorer.score(merged)
+
+    # Get scores with reasons (DataFrame), plus Series for selection
+    scores_df = scorer.score_with_reason(merged)  # response_id, uncertainty_score, coverage_reason
+    scores = pd.Series(scores_df["uncertainty_score"].values, index=scores_df["response_id"])
 
     # ---- Selection ----
     quotas = parse_stream_quota(args.by_stream)
@@ -127,6 +130,7 @@ def main():
     selected = (
         merged[merged["response_id"].isin(selected_ids)]
         .drop_duplicates(subset=["response_id"])
+        .merge(scores_df, on="response_id", how="left")  # add uncertainty columns
         .copy()
     )
 
@@ -140,7 +144,9 @@ def main():
 
     out_cols = [
         "decision_id", "response_id", "prompt_id", "model_id",
-        "bias_stream", "family", "batch_id", "decided_utc", "response_text"
+        "bias_stream", "family",
+        "uncertainty_score", "coverage_reason",
+        "batch_id", "decided_utc", "response_text"
     ]
 
     out_path = os.path.join(base, args.out)
@@ -172,8 +178,9 @@ def main():
         logger.info(f"Archived batch → {archive_dir}")
 
     # ---- Preview ----
-    logger.info("Preview:\n" + selected[["decision_id", "bias_stream"]].head().to_string(index=False))
+    logger.info("Preview:\n" + selected[["decision_id", "bias_stream", "uncertainty_score"]].head().to_string(index=False))
 
 
 if __name__ == "__main__":
     main()
+

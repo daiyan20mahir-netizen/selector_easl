@@ -13,11 +13,12 @@ class UncertaintyScorer(ABC):
         """
         Return a Series indexed by response_id with larger values = more uncertain.
         """
+        raise NotImplementedError
 
 
 class ProxyTfidfDisagreementScorer(UncertaintyScorer):
     """
-    Reproduces your current logic:
+    Reproduces current logic:
       - group by prompt_id
       - compute TF-IDF(1,2) embeddings for all responses to that prompt
       - uncertainty = 1 - mean(pairwise cosine similarity)
@@ -45,7 +46,11 @@ class ProxyTfidfDisagreementScorer(UncertaintyScorer):
             reason = "low_model_disagreement"
         return u, reason
 
-    def score(self, merged: pd.DataFrame) -> pd.Series:
+    def score_with_reason(self, merged: pd.DataFrame) -> pd.DataFrame:
+        """
+        Return a DataFrame with columns:
+          response_id, uncertainty_score, coverage_reason
+        """
         # Expect merged to have: response_id, prompt_id, response_text
         grouped = (
             merged.groupby("prompt_id", dropna=False)["response_text"]
@@ -55,6 +60,12 @@ class ProxyTfidfDisagreementScorer(UncertaintyScorer):
                   .reset_index()
         )
         with_scores = merged.merge(grouped, on="prompt_id", how="left")
-        # Return Series[response_id -> uncertainty_score]
-        s = with_scores.set_index("response_id")["uncertainty_score"]
-        return s.groupby(level=0).max()
+        out = with_scores[["response_id", "uncertainty_score", "coverage_reason"]].drop_duplicates("response_id")
+        return out
+
+    def score(self, merged: pd.DataFrame) -> pd.Series:
+        """
+        Compatibility method: return Series[response_id -> uncertainty_score]
+        """
+        df = self.score_with_reason(merged)
+        return pd.Series(df["uncertainty_score"].values, index=df["response_id"])
