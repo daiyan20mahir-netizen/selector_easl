@@ -1,84 +1,63 @@
-# selection.py
-from __future__ import annotations
+from typing import Literal, Optional, Dict
 import pandas as pd
-from typing import Dict, List
+from scorer import ProxyTfidfDisagreementScorer, MainVarianceScorer
+
+ScorerName = Literal["proxy", "main"]
 
 
-def _rank_df(scores: pd.Series, merged: pd.DataFrame) -> pd.DataFrame:
+def compute_scores(merged: pd.DataFrame, scorer_type: ScorerName) -> tuple[pd.DataFrame, pd.Series]:
     """
-    Combine scores with minimal tie-breakers to match original behavior:
-      - sort by uncertainty_score desc
-      - tie-break: shorter response_text first
+    Build the chosen scorer and return:
+      - scores_df: DataFrame[response_id, uncertainty_score, coverage_reason]
+      - scores:    Series[uncertainty_score] indexed by response_id
     """
-    df = (
-        merged[["response_id", "prompt_id", "bias_stream", "family", "response_text"]]
-        .drop_duplicates(subset=["response_id"])
-        .copy()
-    )
-    df["uncertainty_score"] = df["response_id"].map(scores)
-    df["text_len"] = df["response_text"].astype(str).str.len()
-    df = df.sort_values(["uncertainty_score", "text_len"], ascending=[False, True])
-    return df
+    if scorer_type == "proxy":
+        scorer = ProxyTfidfDisagreementScorer()
+    elif scorer_type == "main":
+        scorer = MainVarianceScorer()
+    else:
+        raise ValueError(f"Unknown scorer '{scorer_type}'. Use 'proxy' or 'main'.")
 
-
-def _apply_per_prompt_cap(df_ranked: pd.DataFrame, max_per_prompt: int) -> pd.DataFrame:
-    if not max_per_prompt or max_per_prompt <= 0:
-        return df_ranked
-    c = df_ranked.copy()
-    c["_rank_within_prompt"] = c.groupby("prompt_id").cumcount()
-    c = c[c["_rank_within_prompt"] < max_per_prompt].drop(columns=["_rank_within_prompt"])
-    return c
-
-
-def _fill_quota(df_ranked: pd.DataFrame, batch: int, quotas: Dict[str, int]) -> List[str]:
-    """
-    quotas: dict like {"gender": 30, "politics": 30}
-    """
-    selected_ids: List[str] = []
-    picked = set()
-
-    # 1) fulfill per-stream quotas in ranked order
-    for stream, q in quotas.items():
-        take = df_ranked[df_ranked["bias_stream"] == stream].head(q)
-        ids = take["response_id"].tolist()
-        selected_ids.extend(ids)
-        picked.update(ids)
-
-    # 2) fill the remainder globally
-    remaining = batch - len(selected_ids)
-    if remaining > 0:
-        filler = df_ranked[~df_ranked["response_id"].isin(picked)].head(remaining)
-        selected_ids.extend(filler["response_id"].tolist())
-
-    # de-dup & truncate (preserve order)
-    seen = set()
-    ordered_unique = []
-    for rid in selected_ids:
-        if rid not in seen:
-            seen.add(rid)
-            ordered_unique.append(rid)
-        if len(ordered_unique) >= batch:
-            break
-    return ordered_unique
+    scores_df = scorer.score_with_reason(merged)
+    scores = pd.Series(scores_df["uncertainty_score"].values, index=scores_df["response_id"])
+    return scores_df, scores
 
 
 def select_batch(
-    scores: pd.Series,
     merged: pd.DataFrame,
-    batch: int,
-    quotas: Dict[str, int] | None = None,
+    scorer_type: ScorerName = "proxy",
+    batch_size: int = 60,
+    by_stream: Optional[Dict[str, int]] = None,
     max_per_prompt: int = 0,
-) -> List[str]:
+) -> pd.DataFrame:
     """
-    Return a list of response_id selected for the batch, honoring:
-      - global ranking by uncertainty
-      - optional per-prompt cap
-      - optional per-stream quotas with global remainder fill
+    Main batch-selection function.
+    Expects merged to contain at least: response_id, prompt_id, bias_stream, response_text (for proxy).
     """
-    ranked = _rank_df(scores, merged)
-    ranked = _apply_per_prompt_cap(ranked, max_per_prompt)
+    scores_df, _ = compute_scores(merged, scorer_type)
+    merged = merged.merge(scores_df, on="response_id", how="left")
 
-    if quotas:
-        return _fill_quota(ranked, batch, quotas)
-    # no quotas: take head(batch)
-    return ranked["response_id"].head(batch).tolist()
+    # Sort by descending uncertainty
+    merged = merged.sort_values("uncertainty_score", ascending=False)
+
+    # Apply per-stream quotas if provided
+    if by_stream:
+        selected_parts = []
+        for stream, quota in by_stream.items():
+            sub = merged[merged["bias_stream"] == stream].head(quota)
+            selected_parts.append(sub)
+        selected = pd.concat(selected_parts, ignore_index=True) if selected_parts else merged.head(batch_size)
+    else:
+        selected = merged.head(batch_size)
+
+    # Optionally limit per prompt
+    if max_per_prompt > 0 and "prompt_id" in selected.columns:
+        selected = (
+            selected.groupby("prompt_id", group_keys=False)
+                    .head(max_per_prompt)
+                    .reset_index(drop=True)
+        )
+    else:
+        selected = selected.reset_index(drop=True)
+
+    return selected
