@@ -127,12 +127,19 @@ def main():
         logger.warning("Batch selection returned 0 items. Check quotas/caps vs data size.")
         return
 
+    selected_base = (
+    merged.drop_duplicates(subset=["response_id"])
+          .merge(scores_df, on="response_id", how="left")  # add uncertainty columns
+)
+
+# Preserve order returned by select_batch (descending uncertainty)
     selected = (
-        merged[merged["response_id"].isin(selected_ids)]
-        .drop_duplicates(subset=["response_id"])
-        .merge(scores_df, on="response_id", how="left")  # add uncertainty columns
+    selected_base
+        .set_index("response_id")
+        .reindex(selected_ids)     # keeps the exact order of selected_ids
+        .reset_index()
         .copy()
-    )
+)
 
     # ---- Finalize and write ----
     batch_id = datetime.now(timezone.utc).strftime("batch_%Y%m%d_%H%M")
